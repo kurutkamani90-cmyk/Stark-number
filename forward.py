@@ -20,7 +20,7 @@ from telegram.ext import (
 
 # === কনফিগারেশন ===
 BOT_TOKEN = "8557102458:AAFcn39gwfbwf-njflJNRwX75quc-5YeS5Q"
-GROUP_ID = -1003564144040  # আপনার দেওয়া নতুন সুপারগ্রুপ আইডি
+GROUP_ID = -1003564144040  # আপনার দেওয়া সুপারগ্রুপ আইডি
 
 # NumberPanel API Credentials
 API_KEY = "np_live_LsBizIkbIxENWBjZDtdMHFY5_680WMAleYFK3s-SSiU"
@@ -72,7 +72,6 @@ def get_country_name(number_str):
 # প্যানেল API থেকে নম্বর আনার ফাংশন
 def fetch_number_from_panel(country_name):
     try:
-        # NumberPanel ডকুমেন্টেশন অনুযায়ী POST রিকোয়েস্ট
         payload = {"service": "WhatsApp", "country": country_name}
         resp = requests.post(API_REQUEST_NUMBER, headers=API_HEADERS, json=payload, timeout=10).json()
         
@@ -175,9 +174,15 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ইনলাইন বাটন ও কান্ট্রি হ্যান্ডলার
 async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     data = query.data
     user_id = update.effective_user.id
+
+    # বাটন লোডিং আটকানোর জন্য
+    if data == "ignore_btn" or data.startswith("copy_"):
+        await query.answer()
+        return
+
+    await query.answer()
 
     if data.startswith("select_"):
         c_key = data.replace("select_", "")
@@ -216,7 +221,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton(f"💬 {numbers[2]}", callback_data=f"copy_{numbers[2]}")],
             [InlineKeyboardButton("🔄 Change Number", callback_data=f"select_{c_key}"),
              InlineKeyboardButton("🌍 Change Country", callback_data="change_country")],
-            [InlineKeyboardButton("📢 OTP Group", url="https://t.me/XclusoRPanelBot")]
+            [InlineKeyboardButton("📢 OTP Group", url="https://t.me/Stark_Empire_M")]
         ])
         await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
 
@@ -236,7 +241,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "refresh_traffic":
         await query.answer("Traffic updated!")
 
-# ব্যাকগ্রাউন্ড ওটিপি পলিং (আপডেটেড - স্প্যাম প্রোটেকশন সহ)
+# ব্যাকগ্রাউন্ড ওটিপি পলিং (আপডেটেড ডিজাইন ও নতুন লিংক সহ)
 async def otp_forwarder(app):
     seen = set()
     first_run = True  # প্রথমবার স্প্যামিং ঠেকানোর ফ্ল্যাগ
@@ -255,19 +260,62 @@ async def otp_forwarder(app):
                 if "whatsapp" in service and uid not in seen:
                     seen.add(uid)
                     
-                    # প্রথমবার বট চালু হলে পুরানো ২০০টি ওটিপি গ্রুপে পাঠাবে না, শুধু নতুনগুলো পাঠাবে
                     if not first_run:
                         otp = extract_otp(raw_msg)
                         
-                        # ১. গ্রুপে ওটিপি পাঠানো
-                        group_text = f"💬 <b>#WHATSAPP</b> +{num}\n🔑 <b>OTP:</b> <code>{otp}</code>"
+                        # --- গ্রুপ মেসেজ ডিজাইন আপডেট ---
+                        
+                        # দেশের নাম, ২ অক্ষরের শর্ট কোড এবং পতাকা বের করা
+                        country_name = "Unknown"
+                        short_code = "UN"
                         try:
-                            await app.bot.send_message(chat_id=GROUP_ID, text=group_text, parse_mode=ParseMode.HTML)
-                            await asyncio.sleep(0.5) # টেলিগ্রামের স্প্যাম লিমিট এড়াতে ছোট ব্রেক
+                            parsed = phonenumbers.parse("+" + num)
+                            country_name = geocoder.country_name_for_number(parsed, "en") or "Unknown"
+                            short_code = phonenumbers.region_code_for_number(parsed) or "UN"
+                        except:
+                            pass
+
+                        flag = "🌐"
+                        for key, val in WHATSAPP_COUNTRIES.items():
+                            if val['name'].lower() == country_name.lower():
+                                flag = val['flag']
+                                break
+                        
+                        # নম্বর মাস্কিং (প্রথম ৩টি ও শেষ ৩টি বাদে মাঝখানে stark)
+                        if len(num) >= 6:
+                            masked_num = f"{num[:3]}stark{num[-3:]}"
+                        else:
+                            masked_num = num
+                            
+                        # ওটিপি ফরম্যাটিং (মাঝখানে হাইফেন)
+                        if len(otp) == 6:
+                            formatted_otp = f"{otp[:3]}-{otp[3:]}"
+                        else:
+                            formatted_otp = otp
+
+                        # নতুন হেডার ডিজাইন (পতাকা, সম্পূর্ণ দেশের নাম, শর্ট কোড ও WhatsApp)
+                        group_text = f"{flag} <b>{country_name} ({short_code})</b> 💬<b>WhatsApp</b>\n<code>{masked_num}</code>"
+                        
+                        # নতুন লিংক যুক্ত ইনলাইন কিবোর্ড বাটন
+                        group_kb = InlineKeyboardMarkup([
+                            [InlineKeyboardButton(f"📋 {formatted_otp}", callback_data="ignore_btn")],
+                            [InlineKeyboardButton("Methods ↗", url="https://t.me/Stark_method"), 
+                             InlineKeyboardButton("Channel ↗", url="https://t.me/Stark_Empire_M")],
+                            [InlineKeyboardButton("OTP Panel ↗", url="https://t.me/Stark_num_bot")]
+                        ])
+
+                        try:
+                            await app.bot.send_message(
+                                chat_id=GROUP_ID, 
+                                text=group_text, 
+                                parse_mode=ParseMode.HTML,
+                                reply_markup=group_kb
+                            )
+                            await asyncio.sleep(0.5)
                         except Exception as e:
                             print(f"Group Send Error: {e}") 
                             
-                        # ২. ইউজার যদি এই নম্বরটি বটে নিয়ে থাকে, তাকে সরাসরি ইনবক্সে পাঠানো
+                        # --- ইউজারকে সরাসরি ইনবক্সে মেসেজ পাঠানো ---
                         matched_user = NUMBER_TO_USER.get(num)
                         if not matched_user:
                             for reg_num, u_id in NUMBER_TO_USER.items():
@@ -292,7 +340,7 @@ async def otp_forwarder(app):
                             except Exception as e:
                                 print(f"User Message Error: {e}")
             
-            first_run = False # প্রথম রাউন্ড শেষ
+            first_run = False 
 
             if len(seen) > 8000:
                 seen = set(list(seen)[-4000:])
@@ -328,4 +376,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-                
+                       
