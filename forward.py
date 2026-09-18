@@ -7,7 +7,8 @@ from aiohttp import web
 import phonenumbers
 from phonenumbers import geocoder
 
-from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+# CopyTextButton ইম্পোর্ট করা হয়েছে কপি ফিচারের জন্য
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, CopyTextButton
 from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder,
@@ -69,17 +70,15 @@ def get_country_name(number_str):
     except:
         return "Unknown"
 
-# প্যানেল API থেকে নম্বর আনার ফাংশন (আপনার দেওয়া কোড অনুযায়ী)
+# প্যানেল API থেকে নম্বর আনার ফাংশন
 def fetch_number_from_panel(country_name):
     try:
         data = {"service": "WhatsApp", "country": country_name}
         res = requests.post(API_REQUEST_NUMBER, headers=API_HEADERS, json=data, timeout=10)
         resp = res.json()
         
-        # Render-এর লগে দেখার জন্য প্রিন্ট (যাতে বুঝতে পারেন প্যানেল কী উত্তর দিচ্ছে)
         print(f"API Response for {country_name}: {resp}")
         
-        # নাম্বারটি এক্সট্র্যাক্ট করা
         if isinstance(resp, dict):
             if "number" in resp:
                 return str(resp["number"])
@@ -248,7 +247,8 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         kb_buttons = []
         for n in numbers:
-            kb_buttons.append([InlineKeyboardButton(f"💬 {n}", callback_data=f"copy_{n}")])
+            # নাম্বার কপি করার জন্য CopyTextButton অ্যাড করা হলো
+            kb_buttons.append([InlineKeyboardButton(f"💬 {n}", copy_text=CopyTextButton(text=n))])
             
         kb_buttons.append([
             InlineKeyboardButton("🔄 Change Number", callback_data=f"select_{c_key}"),
@@ -322,17 +322,19 @@ async def otp_forwarder(app):
                         else:
                             formatted_otp = otp
 
-                        # গ্রুপ মেসেজ ডিজাইন
+                        # গ্রুপ মেসেজ ডিজাইন (সুন্দর ইমোজি সহ এবং #TG বাদে)
                         group_text = (
-                            f"{flag} <b>#TG 💬WhatsApp</b>\n"
-                            f"<b>{country_name} ({short_code})</b>\n\n"
-                            f"<code>{full_num}</code>\n\n"
-                            f"🔐 <b>OTP CODE:</b> <code>{formatted_otp}</code>\n\n"
-                            f"📩 <b>SMS:</b>\n{raw_msg}"
+                            f"✨ {flag} <b>{country_name} ({short_code})</b> ✨\n\n"
+                            f"🟢 <b>App:</b> 💬 <b>WhatsApp</b>\n"
+                            f"📞 <b>Number:</b> <code>{full_num}</code>\n"
+                            f"🔑 <b>OTP:</b> <code>{formatted_otp}</code>\n\n"
+                            f"💬 <b>SMS Details:</b>\n"
+                            f"👉 <code>{raw_msg}</code>"
                         )
                         
+                        # CopyTextButton ব্যবহার করে ওটিপি কপি করার বাটন
                         group_kb = InlineKeyboardMarkup([
-                            [InlineKeyboardButton(f"📋 {formatted_otp}", callback_data="ignore_btn")],
+                            [InlineKeyboardButton(f"📋 Copy OTP: {formatted_otp}", copy_text=CopyTextButton(text=otp))],
                             [InlineKeyboardButton("📚 Methods ↗", url="https://t.me/Stark_method"), 
                              InlineKeyboardButton("📢 Channel ↗", url="https://t.me/Stark_Empire_M")],
                             [InlineKeyboardButton("🌐 OTP Panel ↗", url="https://t.me/Stark_num_bot")]
@@ -410,4 +412,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
