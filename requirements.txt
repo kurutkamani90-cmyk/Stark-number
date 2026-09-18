@@ -1,4 +1,2 @@
 python-telegram-bot==22.7
-requests
-phonenumbers
 aiohttp
