@@ -69,7 +69,7 @@ def get_country_name(number_str):
     except:
         return "Unknown"
 
-# প্যানেল API থেকে নম্বর আনার ফাংশন
+# প্যানেল API থেকে নম্বর আনার ফাংশন (strictly no fake numbers)
 def fetch_number_from_panel(country_name):
     try:
         payload = {"service": "WhatsApp", "country": country_name}
@@ -110,6 +110,8 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 row.append(InlineKeyboardButton(f"{val['flag']} {val['name']}", callback_data=f"select_{key}"))
             buttons.append(row)
             
+        # অটো ট্রাফিক ফেচ বাটন
+        buttons.append([InlineKeyboardButton("🔥 Auto Select (High Traffic)", callback_data="auto_select")])
         markup = InlineKeyboardMarkup(buttons)
         await update.message.reply_text("🌍 <b>Select a Country for WHATSAPP:</b>", parse_mode=ParseMode.HTML, reply_markup=markup)
 
@@ -177,27 +179,53 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = update.effective_user.id
 
-    # বাটন লোডিং আটকানোর জন্য
     if data == "ignore_btn" or data.startswith("copy_"):
         await query.answer()
         return
 
     await query.answer()
 
+    # অটোমেটিক ট্রাফিক স্ক্যান করে সেরা দেশ বাছাই
+    if data == "auto_select":
+        await query.edit_message_text("⏳ <i>Analyzing live traffic to fetch the best country...</i>", parse_mode=ParseMode.HTML)
+        try:
+            resp = requests.get(API_OTP_URL, timeout=8).json()
+            countries = [get_country_name(str(item[1])) for item in resp if "whatsapp" in str(item[0]).lower()]
+            
+            if countries:
+                best_country = Counter([c for c in countries if c != "Unknown"]).most_common(1)[0][0]
+                best_key = next((k for k, v in WHATSAPP_COUNTRIES.items() if v["name"].lower() == best_country.lower()), None)
+                
+                if best_key:
+                    query.data = f"select_{best_key}"
+                    return await handle_callbacks(update, context) # রিকার্সিভ কল
+            
+            await query.edit_message_text("⚠️ <i>Could not determine best traffic. Please select manually.</i>", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="change_country")]]))
+            return
+        except:
+            await query.edit_message_text("⚠️ <i>Analysis failed. Please select manually.</i>", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="change_country")]]))
+            return
+
     if data.startswith("select_"):
         c_key = data.replace("select_", "")
         c_info = WHATSAPP_COUNTRIES.get(c_key, {"name": "Unknown", "code": "", "flag": "🌐"})
         
-        await query.edit_message_text(f"⏳ <i>Fetching 3 active numbers for {c_info['name']}...</i>", parse_mode=ParseMode.HTML)
+        await query.edit_message_text(f"⏳ <i>Fetching live numbers for {c_info['name']} from Panel...</i>", parse_mode=ParseMode.HTML)
         
         numbers = []
         for _ in range(3):
             fetched = fetch_number_from_panel(c_info["name"])
             if fetched:
                 numbers.append(fetched)
-            else:
-                numbers.append(f"+{c_info['code']}179{str(user_id)[-3:]}{len(numbers)+1}4")
 
+        # যদি প্যানেলে কোনো নাম্বার না পাওয়া যায়
+        if not numbers:
+            error_text = f"❌ <b>দুঃখিত!</b>\nবর্তমানে <b>{c_info['name']}</b>-এর কোনো নাম্বার প্যানেলে স্টকে নেই।\n\n<i>একটু পর আবার চেষ্টা করুন বা অন্য দেশ সিলেক্ট করুন।</i>"
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Select Another Country", callback_data="change_country")]])
+            await query.edit_message_text(error_text, parse_mode=ParseMode.HTML, reply_markup=kb)
+            return
+
+        # আগের সেশনের নম্বর ম্যাপিং পরিষ্কার করা
         if user_id in ACTIVE_SESSIONS:
             for old_n in ACTIVE_SESSIONS[user_id]["numbers"]:
                 NUMBER_TO_USER.pop(old_n.replace("+", ""), None)
@@ -208,22 +236,24 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         text = (
             f"🌐 <b>Country:</b> {c_info['flag']} {c_info['name'].upper()}\n\n"
-            f"🕒 <b>Waiting for OTP</b>\n"
+            f"🕒 <b>Waiting for OTP...</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"💬 <code>{numbers[0]}</code>\n"
-            f"💬 <code>{numbers[1]}</code>\n"
-            f"💬 <code>{numbers[2]}</code>\n"
         )
+        for n in numbers:
+            text += f"💬 <code>{n}</code>\n"
         
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"💬 {numbers[0]}", callback_data=f"copy_{numbers[0]}")],
-            [InlineKeyboardButton(f"💬 {numbers[1]}", callback_data=f"copy_{numbers[1]}")],
-            [InlineKeyboardButton(f"💬 {numbers[2]}", callback_data=f"copy_{numbers[2]}")],
-            [InlineKeyboardButton("🔄 Change Number", callback_data=f"select_{c_key}"),
-             InlineKeyboardButton("🌍 Change Country", callback_data="change_country")],
-            [InlineKeyboardButton("📢 OTP Group", url="https://t.me/Stark_Empire_M")]
+        # ডায়নামিক কিবোর্ড বাটন জেনারেট করা
+        kb_buttons = []
+        for n in numbers:
+            kb_buttons.append([InlineKeyboardButton(f"💬 {n}", callback_data=f"copy_{n}")])
+            
+        kb_buttons.append([
+            InlineKeyboardButton("🔄 Change Number", callback_data=f"select_{c_key}"),
+            InlineKeyboardButton("🌍 Change Country", callback_data="change_country")
         ])
-        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        kb_buttons.append([InlineKeyboardButton("📢 OTP Group", url="https://t.me/stark_otp")]) # লিংক আপডেট করা হয়েছে
+        
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(kb_buttons))
 
     elif data == "change_country":
         buttons = []
@@ -233,6 +263,8 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for key, val in c_items[i:i+2]:
                 row.append(InlineKeyboardButton(f"{val['flag']} {val['name']}", callback_data=f"select_{key}"))
             buttons.append(row)
+        buttons.append([InlineKeyboardButton("🔥 Auto Select (High Traffic)", callback_data="auto_select")])
+        
         await query.edit_message_text("🌍 <b>Select a Country for WHATSAPP:</b>", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons))
 
     elif data == "history_btn":
@@ -241,10 +273,10 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "refresh_traffic":
         await query.answer("Traffic updated!")
 
-# ব্যাকগ্রাউন্ড ওটিপি পলিং (আপডেটেড ডিজাইন ও নতুন লিংক সহ)
+# ব্যাকগ্রাউন্ড ওটিপি পলিং (নতুন ডিজাইন ও ইমোজি সহ)
 async def otp_forwarder(app):
     seen = set()
-    first_run = True  # প্রথমবার স্প্যামিং ঠেকানোর ফ্ল্যাগ
+    first_run = True  
     
     while True:
         try:
@@ -256,16 +288,13 @@ async def otp_forwarder(app):
                 raw_msg = item[2]
                 uid = f"{num}_{item[3]}"
                 
-                # শুধুমাত্র হোয়াটসঅ্যাপ ফিল্টার করা হচ্ছে
                 if "whatsapp" in service and uid not in seen:
                     seen.add(uid)
                     
                     if not first_run:
                         otp = extract_otp(raw_msg)
                         
-                        # --- গ্রুপ মেসেজ ডিজাইন আপডেট ---
-                        
-                        # দেশের নাম, ২ অক্ষরের শর্ট কোড এবং পতাকা বের করা
+                        # --- নতুন গ্রুপ মেসেজ ডিজাইন ---
                         country_name = "Unknown"
                         short_code = "UN"
                         try:
@@ -287,21 +316,27 @@ async def otp_forwarder(app):
                         else:
                             masked_num = num
                             
-                        # ওটিপি ফরম্যাটিং (মাঝখানে হাইফেন)
+                        # ওটিপি ফরম্যাটিং 
                         if len(otp) == 6:
                             formatted_otp = f"{otp[:3]}-{otp[3:]}"
                         else:
                             formatted_otp = otp
 
-                        # নতুন হেডার ডিজাইন (পতাকা, সম্পূর্ণ দেশের নাম, শর্ট কোড ও WhatsApp)
-                        group_text = f"{flag} <b>{country_name} ({short_code})</b> 💬<b>WhatsApp</b>\n<code>{masked_num}</code>"
+                        # ইমোজি ও প্রফেশনাল টেক্সট
+                        group_text = (
+                            f"🌟 <b>STARK NEW OTP</b> 🌟\n"
+                            f"━━━━━━━━━━━━━━━━━━\n"
+                            f"🌍 <b>Country:</b> {flag} <b>{country_name} ({short_code})</b>\n"
+                            f"📱 <b>Service:</b> #TG 💬 <b>WhatsApp</b>\n"
+                            f"📞 <b>Number:</b> <code>{masked_num}</code>\n\n"
+                            f"🔐 <b>OTP CODE:</b> <code>{formatted_otp}</code> 👈 <i>(Tap to Copy)</i>\n"
+                            f"━━━━━━━━━━━━━━━━━━"
+                        )
                         
-                        # নতুন লিংক যুক্ত ইনলাইন কিবোর্ড বাটন
                         group_kb = InlineKeyboardMarkup([
-                            [InlineKeyboardButton(f"📋 {formatted_otp}", callback_data="ignore_btn")],
-                            [InlineKeyboardButton("Methods ↗", url="https://t.me/Stark_method"), 
-                             InlineKeyboardButton("Channel ↗", url="https://t.me/Stark_Empire_M")],
-                            [InlineKeyboardButton("OTP Panel ↗", url="https://t.me/Stark_num_bot")]
+                            [InlineKeyboardButton("📚 Methods ↗", url="https://t.me/Stark_method"), 
+                             InlineKeyboardButton("📢 Channel ↗", url="https://t.me/Stark_Empire_M")],
+                            [InlineKeyboardButton("🌐 OTP Panel ↗", url="https://t.me/Stark_num_bot")]
                         ])
 
                         try:
@@ -315,7 +350,7 @@ async def otp_forwarder(app):
                         except Exception as e:
                             print(f"Group Send Error: {e}") 
                             
-                        # --- ইউজারকে সরাসরি ইনবক্সে মেসেজ পাঠানো ---
+                        # --- ইউজার মেসেজ ---
                         matched_user = NUMBER_TO_USER.get(num)
                         if not matched_user:
                             for reg_num, u_id in NUMBER_TO_USER.items():
@@ -338,7 +373,7 @@ async def otp_forwarder(app):
                             try:
                                 await app.bot.send_message(chat_id=matched_user, text=user_text, parse_mode=ParseMode.HTML)
                             except Exception as e:
-                                print(f"User Message Error: {e}")
+                                pass
             
             first_run = False 
 
@@ -376,4 +411,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-                       
+                                                
