@@ -20,11 +20,15 @@ from telegram.ext import (
 
 # === কনফিগারেশন ===
 BOT_TOKEN = "8557102458:AAFcn39gwfbwf-njflJNRwX75quc-5YeS5Q"
-GROUP_ID = -5415927433
-API_OTP_URL = "https://numberpanel.tech/api/otp?count=200"
+GROUP_ID = -1003564144040  # আপনার দেওয়া নতুন সুপারগ্রুপ আইডি
 
-# প্যানেল থেকে নম্বর কেনার API এন্ডপয়েন্ট (প্রয়োজনীয় API Key যুক্ত করে নেবেন)
-API_GET_NUMBER = "https://numberpanel.tech/api/getNumber"
+# NumberPanel API Credentials
+API_KEY = "np_live_LsBizIkbIxENWBjZDtdMHFY5_680WMAleYFK3s-SSiU"
+API_HEADERS = {"Authorization": f"Bearer {API_KEY}"}
+
+# API Endpoints
+API_REQUEST_NUMBER = "https://numberpanel.tech/api/request_number"
+API_OTP_URL = "https://numberpanel.tech/api/otp?count=200"
 
 # মেমোরি ডেটা
 USER_DATA = {}
@@ -68,13 +72,14 @@ def get_country_name(number_str):
 # প্যানেল API থেকে নম্বর আনার ফাংশন
 def fetch_number_from_panel(country_name):
     try:
-        # API কল করে নম্বর ফেচ করা
-        params = {"service": "whatsapp", "country": country_name}
-        resp = requests.get(API_GET_NUMBER, params=params, timeout=5).json()
-        if resp.get("status") == "success" and "number" in resp:
+        # NumberPanel ডকুমেন্টেশন অনুযায়ী POST রিকোয়েস্ট
+        payload = {"service": "WhatsApp", "country": country_name}
+        resp = requests.post(API_REQUEST_NUMBER, headers=API_HEADERS, json=payload, timeout=10).json()
+        
+        if "number" in resp:
             return str(resp["number"])
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Error fetching number: {e}")
     return None
 
 # /start হ্যান্ডলার
@@ -98,7 +103,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         USER_DATA[user_id] = {"otps": 0, "balance": 0.0, "wallet": "Not set"}
 
     if msg == "📞 Get Number":
-        # কান্ট্রি সিলেক্ট বাটন
         buttons = []
         c_items = list(WHATSAPP_COUNTRIES.items())
         for i in range(0, len(c_items), 2):
@@ -113,7 +117,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif msg == "📊 Live Traffic":
         await update.message.reply_text("⏳ <i>Analyzing panel live traffic...</i>", parse_mode=ParseMode.HTML)
         
-        # প্যানেল API লগ থেকে লাইভ ট্রাফিক কাউন্ট করা
         traffic_text = "📊 <b>30 Minute LIVE TRAFFIC (WhatsApp)</b>\n\n"
         try:
             resp = requests.get(API_OTP_URL, timeout=8).json()
@@ -180,7 +183,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         c_key = data.replace("select_", "")
         c_info = WHATSAPP_COUNTRIES.get(c_key, {"name": "Unknown", "code": "", "flag": "🌐"})
         
-        await query.edit_message_text("⏳ <i>Fetching 3 active numbers from panel...</i>", parse_mode=ParseMode.HTML)
+        await query.edit_message_text(f"⏳ <i>Fetching 3 active numbers for {c_info['name']}...</i>", parse_mode=ParseMode.HTML)
         
         numbers = []
         for _ in range(3):
@@ -188,10 +191,8 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if fetched:
                 numbers.append(fetched)
             else:
-                # API থেকে নির্দিষ্ট মুহূর্তে না পেলে ফরম্যাট অনুযায়ী নম্বর স্লট
                 numbers.append(f"+{c_info['code']}179{str(user_id)[-3:]}{len(numbers)+1}4")
 
-        # আগের সেশনের নম্বর ম্যাপিং পরিষ্কার করা
         if user_id in ACTIVE_SESSIONS:
             for old_n in ACTIVE_SESSIONS[user_id]["numbers"]:
                 NUMBER_TO_USER.pop(old_n.replace("+", ""), None)
@@ -235,12 +236,15 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "refresh_traffic":
         await query.answer("Traffic updated!")
 
-# ব্যাকগ্রাউন্ড ওটিপি পলিং
+# ব্যাকগ্রাউন্ড ওটিপি পলিং (আপডেটেড - স্প্যাম প্রোটেকশন সহ)
 async def otp_forwarder(app):
     seen = set()
+    first_run = True  # প্রথমবার স্প্যামিং ঠেকানোর ফ্ল্যাগ
+    
     while True:
         try:
             resp = requests.get(API_OTP_URL, timeout=8).json()
+            
             for item in reversed(resp):
                 service = str(item[0]).lower()
                 num = str(item[1]).replace("+", "")
@@ -250,40 +254,45 @@ async def otp_forwarder(app):
                 # শুধুমাত্র হোয়াটসঅ্যাপ ফিল্টার করা হচ্ছে
                 if "whatsapp" in service and uid not in seen:
                     seen.add(uid)
-                    otp = extract_otp(raw_msg)
                     
-                    # ১. গ্রুপে ওটিপি পাঠানো
-                    group_text = f"💬 <b>#WHATSAPP</b> +{num}\n🔑 <b>OTP:</b> <code>{otp}</code>"
-                    try:
-                        await app.bot.send_message(chat_id=GROUP_ID, text=group_text, parse_mode=ParseMode.HTML)
-                    except Exception as e:
-                        print(f"Group send failed: {e}")
+                    # প্রথমবার বট চালু হলে পুরানো ২০০টি ওটিপি গ্রুপে পাঠাবে না, শুধু নতুনগুলো পাঠাবে
+                    if not first_run:
+                        otp = extract_otp(raw_msg)
                         
-                    # ২. ইউজার যদি এই নম্বরটি বটে নিয়ে থাকে, তাকে সরাসরি ইনবক্সে পাঠানো
-                    matched_user = NUMBER_TO_USER.get(num)
-                    if not matched_user:
-                        # আংশিক নম্বর ম্যাচিং (লাস্ট ৭ ডিজিট)
-                        for reg_num, u_id in NUMBER_TO_USER.items():
-                            if num.endswith(reg_num[-7:]):
-                                matched_user = u_id
-                                break
-
-                    if matched_user:
-                        if matched_user in USER_DATA:
-                            USER_DATA[matched_user]['otps'] += 1
-                            USER_DATA[matched_user]['balance'] += 0.05
-                            
-                        user_text = (
-                            f"🎉 <b>WhatsApp OTP Received!</b>\n\n"
-                            f"📱 <b>Number:</b> <code>+{num}</code>\n"
-                            f"🔑 <b>OTP Code:</b> <code>{otp}</code>\n"
-                            f"📩 <b>Raw SMS:</b> {raw_msg}\n\n"
-                            f"💰 <i>$0.05 আপনার ব্যালেন্সে যোগ করা হয়েছে!</i>"
-                        )
+                        # ১. গ্রুপে ওটিপি পাঠানো
+                        group_text = f"💬 <b>#WHATSAPP</b> +{num}\n🔑 <b>OTP:</b> <code>{otp}</code>"
                         try:
-                            await app.bot.send_message(chat_id=matched_user, text=user_text, parse_mode=ParseMode.HTML)
+                            await app.bot.send_message(chat_id=GROUP_ID, text=group_text, parse_mode=ParseMode.HTML)
+                            await asyncio.sleep(0.5) # টেলিগ্রামের স্প্যাম লিমিট এড়াতে ছোট ব্রেক
                         except Exception as e:
-                            print(f"User direct message failed: {e}")
+                            print(f"Group Send Error: {e}") 
+                            
+                        # ২. ইউজার যদি এই নম্বরটি বটে নিয়ে থাকে, তাকে সরাসরি ইনবক্সে পাঠানো
+                        matched_user = NUMBER_TO_USER.get(num)
+                        if not matched_user:
+                            for reg_num, u_id in NUMBER_TO_USER.items():
+                                if num.endswith(reg_num[-7:]):
+                                    matched_user = u_id
+                                    break
+
+                        if matched_user:
+                            if matched_user in USER_DATA:
+                                USER_DATA[matched_user]['otps'] += 1
+                                USER_DATA[matched_user]['balance'] += 0.05
+                                
+                            user_text = (
+                                f"🎉 <b>WhatsApp OTP Received!</b>\n\n"
+                                f"📱 <b>Number:</b> <code>+{num}</code>\n"
+                                f"🔑 <b>OTP Code:</b> <code>{otp}</code>\n"
+                                f"📩 <b>Raw SMS:</b> {raw_msg}\n\n"
+                                f"💰 <i>$0.05 আপনার ব্যালেন্সে যোগ করা হয়েছে!</i>"
+                            )
+                            try:
+                                await app.bot.send_message(chat_id=matched_user, text=user_text, parse_mode=ParseMode.HTML)
+                            except Exception as e:
+                                print(f"User Message Error: {e}")
+            
+            first_run = False # প্রথম রাউন্ড শেষ
 
             if len(seen) > 8000:
                 seen = set(list(seen)[-4000:])
@@ -319,3 +328,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+                
