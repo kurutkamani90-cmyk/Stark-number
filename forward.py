@@ -1,261 +1,129 @@
 import asyncio
-import re
-import requests
 import os
-import phonenumbers
-from phonenumbers import geocoder
-from telegram import Bot, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.constants import ParseMode
 from aiohttp import web
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.constants import ParseMode
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
-try:
-    from telegram import CopyTextButton
-except ImportError:
-    CopyTextButton = None
-
-# === CONFIGURATION ===
 BOT_TOKEN = "8557102458:AAFcn39gwfbwf-njflJNRwX75quc-5YeS5Q"
-GROUP_ID = -5415927433
-API_URL = "https://numberpanel.tech/api/otp?count=200"
-POLL_INTERVAL = 10
 
-APP_EMOJIS = {
-    "whatsapp": "💬",
-    "telegram": "✈️",
-    "facebook": "📘",
-    "instagram": "📸",
-    "tiktok": "🎵",
-    "google": "🌐",
-    "twitter": "🐦"
-}
+# স্থায়ী কিবোর্ড বাটন
+MAIN_KEYBOARD = ReplyKeyboardMarkup(
+    [
+        ["📞 Get Number", "👤 My Account"],
+        ["💵 Withdraw", "📊 Live Traffic"],
+        ["👥 Refer & Earn", "⚙️ Help"]
+    ],
+    resize_keyboard=True
+)
 
-def get_app_emoji(service_name):
-    service_name = str(service_name).lower()
-    for key, emoji in APP_EMOJIS.items():
-        if key in service_name:
-            return emoji
-    return "📱"
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "<b>Welcome to Stark Number Bot</b> ✅\n\n"
+        "<b>Get instant OTP codes!</b> 💥\n\n"
+        "👤 <b>Your OTPs:</b> 0\n"
+        "💰 <b>Your Balance:</b> $0.0000\n"
+        "📡 <b>Choose an option below:</b>"
+    )
+    inline_kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📞 Get Number", callback_data="get_num"), InlineKeyboardButton("⭐ My Status", callback_data="my_status")],
+        [InlineKeyboardButton("🌐 OTP Range", callback_data="otp_range"), InlineKeyboardButton("⚙️ Help", callback_data="help")]
+    ])
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=MAIN_KEYBOARD)
+    await update.message.reply_text("👇 Quick Options:", reply_markup=inline_kb)
 
-def get_country_info(phone_number):
-    if not phone_number.startswith('+'):
-        phone_number = '+' + phone_number
-    try:
-        parsed = phonenumbers.parse(phone_number)
-        country_name = geocoder.country_name_for_number(parsed, "en") or "Unknown"
-        region = phonenumbers.region_code_for_number(parsed)
-        if region:
-            flag = chr(ord(region[0]) + 127397) + chr(ord(region[1]) + 127397)
-        else:
-            flag = "🏳️"
-        iso = region or "UN"
-        return country_name, flag, iso
-    except:
-        return "Unknown", "🏳️", "UN"
-
-def extract_otp(msg):
-    otp_match = re.search(r'\d{3}[-\s]?\d{3,4}|\d{4,8}', msg)
-    return otp_match.group(0) if otp_match else 'Unknown'
-
-def mask_number(num):
-    num = str(num).replace('+', '')
-    if len(num) <= 6:
-        return num
-    return num[:3] + "x" * (len(num) - 6) + num[-3:]
-
-async def send_to_group(bot, entry):
-    service = entry[0]
-    num = entry[1]
-    msg = entry[2]
+async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message.text
     
-    country_name, flag, iso = get_country_info(num)
-    app_emoji = get_app_emoji(service)
-    masked = mask_number(num)
-    otp = extract_otp(msg)
-    
-    text = f"{flag} <b>#{iso} {app_emoji}{service} {masked}</b>"
-    
-    if CopyTextButton:
-        try:
-            row1 = [InlineKeyboardButton(text=f"{otp}", copy_text=CopyTextButton(text=otp))]
-        except:
-            row1 = [InlineKeyboardButton(text=f"🔑 {otp}", callback_data="noop")]
-    else:
-        row1 = [InlineKeyboardButton(text=f"🔑 {otp}", callback_data="noop")]
-        
-    row2 = [
-        InlineKeyboardButton(text="Methods", url="https://youtube.com/@xclusor"),
-        InlineKeyboardButton(text="Channel", url="https://whatsapp.com/channel/0029VbC0kzIEFeXq9XLgHZ3y")
-    ]
-    row3 = [InlineKeyboardButton(text="OTP Panel", url="https://t.me/XclusoRPanelBot")]
-    
-    markup = InlineKeyboardMarkup([row1, row2, row3])
-    
-    try:
-        await bot.send_message(
-            chat_id=GROUP_ID,
-            text=text,
+    if msg == "📞 Get Number":
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_home")]])
+        await update.message.reply_text(
+            "⭐ <b>No stock available at the moment.</b>\nPlease check back later!",
             parse_mode=ParseMode.HTML,
-            reply_markup=markup,
-            disable_web_page_preview=True
+            reply_markup=kb
         )
-        print(f"✅ Sent OTP for {num} - {service}")
-    except Exception as e:
-        print(f"❌ Failed to send to group: {e}")
+    elif msg == "👤 My Account":
+        text = (
+            "👤 <b>MY ACCOUNT</b>\n\n"
+            "🔴 <b>Live Balance:</b> $0.0000\n"
+            "<b>OTPs Today:</b> 0\n"
+            "🚀 <b>Total OTPs:</b> 0\n"
+            "💵 <b>Total Earnings:</b> $0.0000\n"
+            "💰 <b>Total Withdrawn:</b> $0.0000 (0 times)\n"
+            "💲 <b>Rate per OTP:</b> $0.0010\n\n"
+            "🔘 <b>Referral Earnings:</b> $0.0000\n"
+            "👥 <b>People Referred:</b> 0"
+        )
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+    elif msg == "💵 Withdraw":
+        text = (
+            "💲 <b>WITHDRAWAL SETUP</b>\n\n"
+            "You have not set your <b>USDT BEP20</b> Wallet Address.\n\n"
+            "🔄 <i>Please send your USDT BEP20 Wallet Address now:</i>"
+        )
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Cancel", callback_data="cancel_withdraw")]])
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    elif msg == "📊 Live Traffic":
+        text = (
+            "★ <b>Traffic Stats (Last 10 Min HITS)</b>\n"
+            "⭐ <b>Available Numbers:</b> 0\n"
+            "⭐ <b>Countries Active:</b> 0\n"
+            "🔄 <b>Services Active:</b> 0\n\n"
+            "➡️ 💬 WhatsApp (Central African Republic) ➔ ⚡ HIGH\n"
+            "➡️ 💬 WhatsApp (Nigeria) ➔ ⚡ HIGH\n"
+            "➡️ 💬 WhatsApp (Togo) ➔ ⚡ MEDIUM"
+        )
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+    elif msg == "👥 Refer & Earn":
+        bot_username = (await context.bot.get_me()).username
+        user_id = update.effective_user.id
+        ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
+        text = (
+            "👥 <b>REFER & EARN</b>\n\n"
+            "🤑 <b>You earn 3% of your friends' OTP earnings!</b>\n\n"
+            f"🔗 <b>Your Referral Link:</b>\n<code>{ref_link}</code>\n\n"
+            "👥 <b>People Referred:</b> 0\n"
+            "🔘 <b>Referral Earnings:</b> $0.0000\n\n"
+            "⚠️ <i>Share this link with friends to earn commission!</i>"
+        )
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+    elif msg == "⚙️ Help":
+        text = (
+            "⚙️ <b>Help & Instructions</b>\n\n"
+            "📞 <b>Get Number</b> - Get a phone number for OTP.\n"
+            "⭐ <b>My Status</b> - Check active number & OTP status.\n"
+            "⏳ Usually takes 30-60 seconds for OTP.\n\n"
+            "⚠️ <i>Numbers auto-release after 10 minutes.</i>"
+        )
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
-async def otp_checker(bot):
-    seen_otps = set()
-    print("🚀 Starting Forwarder Bot Loop...")
-    try:
-        resp = requests.get(API_URL).json()
-        for item in resp:
-            uid = f"{item[0]}_{item[1]}_{item[3]}"
-            seen_otps.add(uid)
-        print(f"📦 Initialized with {len(seen_otps)} existing OTPs.")
-    except Exception as e:
-        print(f"⚠️ Initial API fetch failed: {e}")
-        
-    while True:
-        try:
-            resp = requests.get(API_URL).json()
-            for item in reversed(resp):
-                uid = f"{item[0]}_{item[1]}_{item[3]}"
-                if uid not in seen_otps:
-                    seen_otps.add(uid)
-                    await send_to_group(bot, item)
-                    await asyncio.sleep(0.5)
-                    
-            if len(seen_otps) > 10000:
-                seen_otps = set(list(seen_otps)[-5000:])
-        except Exception as e:
-            print(f"⚠️ Error fetching API: {e}")
-            
-        await asyncio.sleep(POLL_INTERVAL)
-
-async def handle_ping(request):
-    return web.Response(text="Bot is running!")
-
-async def main():
-    bot = Bot(token=BOT_TOKEN)
-    
-    # Start background OTP polling
-    asyncio.create_task(otp_checker(bot))
-    
-    # Start Web Server for Render Port Check
+# রেন্ডারের পোর্ট যাচাইয়ের জন্য ডামি ওয়েব সার্ভার
+async def run_web_server():
     app = web.Application()
-    app.router.add_get("/", handle_ping)
-    
+    app.router.add_get("/", lambda r: web.Response(text="Bot is running!"))
     port = int(os.environ.get("PORT", 8080))
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"🌐 Dummy Web Server listening on port {port}")
-    
-    while True:
-        await asyncio.sleep(3600)
-
-if __name__ == "__main__":
-    asyncio.run(main())
-def get_country_info(phone_number):
-    if not phone_number.startswith('+'):
-        phone_number = '+' + phone_number
-    try:
-        parsed = phonenumbers.parse(phone_number)
-        country_name = geocoder.country_name_for_number(parsed, "en") or "Unknown"
-        # Get flag emoji from country code
-        region = phonenumbers.region_code_for_number(parsed)
-        if region:
-            flag = chr(ord(region[0]) + 127397) + chr(ord(region[1]) + 127397)
-        else:
-            flag = "🏳️"
-        iso = region or "UN"
-        return country_name, flag, iso
-    except:
-        return "Unknown", "🏳️", "UN"
-
-def extract_otp(msg):
-    otp_match = re.search(r'\d{3}[-\s]?\d{3,4}|\d{4,8}', msg)
-    return otp_match.group(0) if otp_match else 'Unknown'
-
-def mask_number(num):
-    num = str(num).replace('+', '')
-    if len(num) <= 6:
-        return num
-    return num[:3] + "x" * (len(num) - 6) + num[-3:]
-
-async def send_to_group(bot, entry):
-    service = entry[0]
-    num = entry[1]
-    msg = entry[2]
-    
-    country_name, flag, iso = get_country_info(num)
-    app_emoji = get_app_emoji(service)
-    masked = mask_number(num)
-    otp = extract_otp(msg)
-    
-    text = f"{flag} <b>#{iso} {app_emoji}{service} {masked}</b> <tg-emoji emoji-id=\"5264919878082509254\">▶️</tg-emoji>"
-    
-    if CopyTextButton:
-        try:
-            row1 = [InlineKeyboardButton(text=f"{otp}", copy_text=CopyTextButton(text=otp), icon_custom_emoji_id="6176966310920983412")]
-        except:
-            row1 = [InlineKeyboardButton(text=f"🔑 {otp}", callback_data="noop")]
-    else:
-        row1 = [InlineKeyboardButton(text=f"🔑 {otp}", callback_data="noop")]
-        
-    row2 = [
-        InlineKeyboardButton(text="Methods", url="https://youtube.com/@xclusor", icon_custom_emoji_id="5807797645443340724"),
-        InlineKeyboardButton(text="Channel", url="https://whatsapp.com/channel/0029VbC0kzIEFeXq9XLgHZ3y", icon_custom_emoji_id="5429571366384842791")
-    ]
-    row3 = [InlineKeyboardButton(text="OTP Panel", url="https://t.me/XclusoRPanelBot", icon_custom_emoji_id="5372917041193828849")]
-    
-    markup = InlineKeyboardMarkup([row1, row2, row3])
-    
-    try:
-        await bot.send_message(
-            chat_id=GROUP_ID,
-            text=text,
-            parse_mode=ParseMode.HTML,
-            reply_markup=markup,
-            disable_web_page_preview=True
-        )
-        print(f"✅ Sent OTP for {num} - {service}")
-    except Exception as e:
-        print(f"❌ Failed to send to group: {e}")
+    print(f"Server started on port {port}")
 
 async def main():
-    bot = Bot(token=BOT_TOKEN)
-    seen_otps = set()
+    # ওয়েব সার্ভার শুরু
+    await run_web_server()
     
-    print("🚀 Starting Forwarder Bot...")
+    # টেলিগ্রাম বট শুরু
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
     
-    # Initial fetch to prevent sending old OTPs
-    try:
-        resp = requests.get(API_URL).json()
-        for item in resp:
-            uid = f"{item[0]}_{item[1]}_{item[3]}"
-            seen_otps.add(uid)
-        print(f"📦 Initialized with {len(seen_otps)} existing OTPs.")
-    except Exception as e:
-        print(f"⚠️ Initial API fetch failed: {e}")
-        
-    while True:
-        try:
-            resp = requests.get(API_URL).json()
-            for item in reversed(resp):
-                uid = f"{item[0]}_{item[1]}_{item[3]}"
-                if uid not in seen_otps:
-                    seen_otps.add(uid)
-                    await send_to_group(bot, item)
-                    await asyncio.sleep(0.5)
-                    
-            if len(seen_otps) > 10000:
-                seen_otps = set(list(seen_otps)[-5000:])
-                
-        except Exception as e:
-            print(f"⚠️ Error fetching API: {e}")
-            
-        await asyncio.sleep(POLL_INTERVAL)
+    print("Bot polling started...")
+    async with app:
+        await app.start()
+        await app.updater.start_polling()
+        while True:
+            await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
