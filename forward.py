@@ -69,16 +69,24 @@ def get_country_name(number_str):
     except:
         return "Unknown"
 
-# প্যানেল API থেকে নম্বর আনার ফাংশন (strictly no fake numbers)
+# প্যানেল API থেকে নম্বর আনার ফাংশন (আপনার দেওয়া কোড অনুযায়ী)
 def fetch_number_from_panel(country_name):
     try:
-        payload = {"service": "WhatsApp", "country": country_name}
-        resp = requests.post(API_REQUEST_NUMBER, headers=API_HEADERS, json=payload, timeout=10).json()
+        data = {"service": "WhatsApp", "country": country_name}
+        res = requests.post(API_REQUEST_NUMBER, headers=API_HEADERS, json=data, timeout=10)
+        resp = res.json()
         
-        if "number" in resp:
-            return str(resp["number"])
+        # Render-এর লগে দেখার জন্য প্রিন্ট (যাতে বুঝতে পারেন প্যানেল কী উত্তর দিচ্ছে)
+        print(f"API Response for {country_name}: {resp}")
+        
+        # নাম্বারটি এক্সট্র্যাক্ট করা
+        if isinstance(resp, dict):
+            if "number" in resp:
+                return str(resp["number"])
+            elif "data" in resp and "number" in resp["data"]:
+                return str(resp["data"]["number"])
     except Exception as e:
-        print(f"Error fetching number: {e}")
+        print(f"Error fetching number from API: {e}")
     return None
 
 # /start হ্যান্ডলার
@@ -110,7 +118,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 row.append(InlineKeyboardButton(f"{val['flag']} {val['name']}", callback_data=f"select_{key}"))
             buttons.append(row)
             
-        # অটো ট্রাফিক ফেচ বাটন
         buttons.append([InlineKeyboardButton("🔥 Auto Select (High Traffic)", callback_data="auto_select")])
         markup = InlineKeyboardMarkup(buttons)
         await update.message.reply_text("🌍 <b>Select a Country for WHATSAPP:</b>", parse_mode=ParseMode.HTML, reply_markup=markup)
@@ -185,7 +192,6 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.answer()
 
-    # অটোমেটিক ট্রাফিক স্ক্যান করে সেরা দেশ বাছাই
     if data == "auto_select":
         await query.edit_message_text("⏳ <i>Analyzing live traffic to fetch the best country...</i>", parse_mode=ParseMode.HTML)
         try:
@@ -198,7 +204,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 if best_key:
                     query.data = f"select_{best_key}"
-                    return await handle_callbacks(update, context) # রিকার্সিভ কল
+                    return await handle_callbacks(update, context) 
             
             await query.edit_message_text("⚠️ <i>Could not determine best traffic. Please select manually.</i>", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="change_country")]]))
             return
@@ -218,14 +224,12 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if fetched:
                 numbers.append(fetched)
 
-        # যদি প্যানেলে কোনো নাম্বার না পাওয়া যায়
         if not numbers:
-            error_text = f"❌ <b>দুঃখিত!</b>\nবর্তমানে <b>{c_info['name']}</b>-এর কোনো নাম্বার প্যানেলে স্টকে নেই।\n\n<i>একটু পর আবার চেষ্টা করুন বা অন্য দেশ সিলেক্ট করুন।</i>"
+            error_text = f"❌ <b>দুঃখিত!</b>\nবর্তমানে <b>{c_info['name']}</b>-এর কোনো নাম্বার প্যানেল থেকে পাওয়া যায়নি।\n\n<i>হয়তো স্টক শেষ অথবা প্যানেল সমস্যা করছে। একটু পর আবার চেষ্টা করুন।</i>"
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Select Another Country", callback_data="change_country")]])
             await query.edit_message_text(error_text, parse_mode=ParseMode.HTML, reply_markup=kb)
             return
 
-        # আগের সেশনের নম্বর ম্যাপিং পরিষ্কার করা
         if user_id in ACTIVE_SESSIONS:
             for old_n in ACTIVE_SESSIONS[user_id]["numbers"]:
                 NUMBER_TO_USER.pop(old_n.replace("+", ""), None)
@@ -242,7 +246,6 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for n in numbers:
             text += f"💬 <code>{n}</code>\n"
         
-        # ডায়নামিক কিবোর্ড বাটন জেনারেট করা
         kb_buttons = []
         for n in numbers:
             kb_buttons.append([InlineKeyboardButton(f"💬 {n}", callback_data=f"copy_{n}")])
@@ -251,7 +254,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🔄 Change Number", callback_data=f"select_{c_key}"),
             InlineKeyboardButton("🌍 Change Country", callback_data="change_country")
         ])
-        kb_buttons.append([InlineKeyboardButton("📢 OTP Group", url="https://t.me/stark_otp")]) # লিংক আপডেট করা হয়েছে
+        kb_buttons.append([InlineKeyboardButton("📢 OTP Group", url="https://t.me/stark_otp")]) 
         
         await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(kb_buttons))
 
@@ -273,7 +276,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "refresh_traffic":
         await query.answer("Traffic updated!")
 
-# ব্যাকগ্রাউন্ড ওটিপি পলিং (নতুন ডিজাইন ও ইমোজি সহ)
+# ব্যাকগ্রাউন্ড ওটিপি পলিং
 async def otp_forwarder(app):
     seen = set()
     first_run = True  
@@ -294,7 +297,7 @@ async def otp_forwarder(app):
                     if not first_run:
                         otp = extract_otp(raw_msg)
                         
-                        # --- নতুন গ্রুপ মেসেজ ডিজাইন ---
+                        # দেশের নাম, ২ অক্ষরের শর্ট কোড এবং পতাকা বের করা
                         country_name = "Unknown"
                         short_code = "UN"
                         try:
@@ -310,11 +313,8 @@ async def otp_forwarder(app):
                                 flag = val['flag']
                                 break
                         
-                        # নম্বর মাস্কিং (প্রথম ৩টি ও শেষ ৩টি বাদে মাঝখানে stark)
-                        if len(num) >= 6:
-                            masked_num = f"{num[:3]}stark{num[-3:]}"
-                        else:
-                            masked_num = num
+                        # মাস্কিং বাতিল, ফুল নাম্বার প্লাস (+) সহ
+                        full_num = f"+{num}"
                             
                         # ওটিপি ফরম্যাটিং 
                         if len(otp) == 6:
@@ -322,18 +322,17 @@ async def otp_forwarder(app):
                         else:
                             formatted_otp = otp
 
-                        # ইমোজি ও প্রফেশনাল টেক্সট
+                        # গ্রুপ মেসেজ ডিজাইন
                         group_text = (
-                            f"🌟 <b>STARK NEW OTP</b> 🌟\n"
-                            f"━━━━━━━━━━━━━━━━━━\n"
-                            f"🌍 <b>Country:</b> {flag} <b>{country_name} ({short_code})</b>\n"
-                            f"📱 <b>Service:</b> #TG 💬 <b>WhatsApp</b>\n"
-                            f"📞 <b>Number:</b> <code>{masked_num}</code>\n\n"
-                            f"🔐 <b>OTP CODE:</b> <code>{formatted_otp}</code> 👈 <i>(Tap to Copy)</i>\n"
-                            f"━━━━━━━━━━━━━━━━━━"
+                            f"{flag} <b>#TG 💬WhatsApp</b>\n"
+                            f"<b>{country_name} ({short_code})</b>\n\n"
+                            f"<code>{full_num}</code>\n\n"
+                            f"🔐 <b>OTP CODE:</b> <code>{formatted_otp}</code>\n\n"
+                            f"📩 <b>SMS:</b>\n{raw_msg}"
                         )
                         
                         group_kb = InlineKeyboardMarkup([
+                            [InlineKeyboardButton(f"📋 {formatted_otp}", callback_data="ignore_btn")],
                             [InlineKeyboardButton("📚 Methods ↗", url="https://t.me/Stark_method"), 
                              InlineKeyboardButton("📢 Channel ↗", url="https://t.me/Stark_Empire_M")],
                             [InlineKeyboardButton("🌐 OTP Panel ↗", url="https://t.me/Stark_num_bot")]
@@ -411,4 +410,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-                                                
+        
